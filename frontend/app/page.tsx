@@ -2,139 +2,163 @@
 
 import { FormEvent, useState } from "react";
 
+type Message = {
+  id: number;
+  sender: "user" | "assistant";
+  text: string;
+};
+
 export default function Home() {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [subject, setSubject] = useState("");
-  const [message, setMessage] = useState("");
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: 1,
+      sender: "assistant",
+      text: "Hi! 👋 I'm your AI support assistant. How can I help you today?",
+    },
+  ]);
 
+  const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState("");
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function sendMessage(event: FormEvent) {
     event.preventDefault();
 
+    const text = input.trim();
+
+    if (!text || loading) return;
+
+    const userMessage: Message = {
+      id: Date.now(),
+      sender: "user",
+      text,
+    };
+
+    setMessages((current) => [...current, userMessage]);
+    setInput("");
     setLoading(true);
-    setResult("");
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/tickets", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          customer_name: name,
-          customer_email: email,
-          subject,
-          message,
-        }),
-      });
+      const response = await fetch(
+        "http://127.0.0.1:8000/tickets",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            customer_name: "Guest Customer",
+            customer_email: "guest@example.com",
+            subject: "Customer Support Request",
+            message: text,
+          }),
+        }
+      );
 
       if (!response.ok) {
         throw new Error("Failed to create ticket");
       }
 
-      const data = await response.json();
+      const ticket = await response.json();
 
-      setResult(`Ticket #${data.id} created successfully.`);
+      const assistantMessage: Message = {
+        id: Date.now() + 1,
+        sender: "assistant",
+        text: `I've created support ticket #${ticket.id} for you. 🎫 A support agent can now review your request.`,
+      };
 
-      setName("");
-      setEmail("");
-      setSubject("");
-      setMessage("");
+      setMessages((current) => [...current, assistantMessage]);
     } catch (error) {
       console.error(error);
-      setResult("Failed to create ticket.");
+
+      const errorMessage: Message = {
+        id: Date.now() + 1,
+        sender: "assistant",
+        text: "Sorry, I couldn't create your support ticket right now. Please make sure the backend server is running.",
+      };
+
+      setMessages((current) => [...current, errorMessage]);
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <main className="min-h-screen bg-gray-100 px-6 py-12">
-      <div className="mx-auto max-w-2xl rounded-2xl bg-white p-8 shadow-lg">
-        <h1 className="text-3xl font-bold text-gray-900">
-          Customer Support
-        </h1>
-
-        <p className="mt-2 mb-8 text-gray-600">
-          Tell us about your problem and our support team will help you.
-        </p>
-
-        <form onSubmit={handleSubmit} className="space-y-5">
+    <main className="flex min-h-screen items-center justify-center bg-gray-100 p-4">
+      <div className="flex h-[700px] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+        {/* Header */}
+        <header className="flex items-center justify-between border-b px-6 py-4">
           <div>
-            <label className="mb-2 block font-medium">
-              Name
-            </label>
+            <h1 className="text-xl font-bold text-gray-900">
+              AI Support
+            </h1>
 
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              placeholder="Your name"
-              className="w-full rounded-lg border border-gray-300 p-3 outline-none focus:border-black"
-            />
+            <div className="mt-1 flex items-center gap-2 text-sm text-gray-500">
+              <span className="h-2 w-2 rounded-full bg-green-500"></span>
+              Online
+            </div>
           </div>
 
-          <div>
-            <label className="mb-2 block font-medium">
-              Email
-            </label>
-
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              placeholder="you@example.com"
-              className="w-full rounded-lg border border-gray-300 p-3 outline-none focus:border-black"
-            />
+          <div className="rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-600">
+            Support Assistant
           </div>
+        </header>
 
-          <div>
-            <label className="mb-2 block font-medium">
-              Subject
-            </label>
+        {/* Chat */}
+        <section className="flex-1 space-y-4 overflow-y-auto bg-gray-50 p-6">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`flex ${
+                message.sender === "user"
+                  ? "justify-end"
+                  : "justify-start"
+              }`}
+            >
+              <div
+                className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm ${
+                  message.sender === "user"
+                    ? "rounded-br-md bg-black text-white"
+                    : "rounded-bl-md bg-white text-gray-800 shadow-sm"
+                }`}
+              >
+                {message.text}
+              </div>
+            </div>
+          ))}
 
+          {loading && (
+            <div className="flex justify-start">
+              <div className="rounded-2xl rounded-bl-md bg-white px-4 py-3 text-sm text-gray-500 shadow-sm">
+                Creating your support ticket... ⏳
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* Input */}
+        <form
+          onSubmit={sendMessage}
+          className="border-t bg-white p-4"
+        >
+          <div className="flex items-center gap-3">
             <input
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              required
-              placeholder="What is the issue?"
-              className="w-full rounded-lg border border-gray-300 p-3 outline-none focus:border-black"
-            />
-          </div>
-
-          <div>
-            <label className="mb-2 block font-medium">
-              Message
-            </label>
-
-            <textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              required
-              rows={6}
+              type="text"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
               placeholder="Describe your problem..."
-              className="w-full rounded-lg border border-gray-300 p-3 outline-none focus:border-black"
+              disabled={loading}
+              className="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm text-black outline-none placeholder:text-gray-400 focus:border-black disabled:bg-gray-100"
             />
-          </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-black px-4 py-3 font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {loading ? "Submitting..." : "Submit Ticket"}
-          </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="rounded-xl bg-black px-5 py-3 text-sm font-medium text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loading ? "Sending..." : "Send"}
+            </button>
+          </div>
         </form>
-
-        {result && (
-          <div className="mt-6 rounded-lg bg-gray-100 p-4 font-medium">
-            {result}
-          </div>
-        )}
       </div>
     </main>
   );
