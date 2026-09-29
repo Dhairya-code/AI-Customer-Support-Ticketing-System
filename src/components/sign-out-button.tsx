@@ -4,7 +4,11 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { signOut } from "@/lib/auth-client";
 
-export function SignOutButton() {
+export function SignOutButton({
+  redirectTo = "/login",
+}: {
+  redirectTo?: "/login" | "/admin/login";
+}) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -18,7 +22,7 @@ export function SignOutButton() {
       setPending(false);
       return;
     }
-    router.replace("/login");
+    router.replace(redirectTo);
     router.refresh();
   }
 

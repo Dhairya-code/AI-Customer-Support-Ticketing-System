@@ -4,9 +4,10 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 import { USER_ROLES, type UserRole } from "@/db/schema";
 import { auth, type SessionUser } from "./auth";
-import { authorize } from "./authorize";
+import { AuthError, authorize } from "./authorize";
+import { STAFF_ROLES } from "./staff-auth";
 
-export { AuthError } from "./authorize";
+export { AuthError };
 
 // Cached per request so layouts, pages and actions share one session lookup.
 export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
@@ -28,6 +29,18 @@ export async function requireRole(
 export async function redirectIfSignedIn(): Promise<void> {
   if (await getCurrentUser()) {
     redirect("/");
+  }
+}
+
+// For pages under /admin: visitors who are not staff land on the staff login
+// rather than an error page, so the portal gives nothing away. Route handlers
+// should call requireRole(STAFF_ROLES) and answer 401/403 instead.
+export async function requireStaffPage(): Promise<SessionUser> {
+  try {
+    return await requireRole(STAFF_ROLES);
+  } catch (error) {
+    if (error instanceof AuthError) redirect("/admin/login");
+    throw error;
   }
 }
 

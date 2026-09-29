@@ -4,9 +4,9 @@
 
 **Blocked by:** 03: Better Auth Integration and Role-Based Guards
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Create `src/app/admin/login/page.tsx` with dedicated staff login styling.
-- [ ] Authenticate staff credentials using Better Auth.
-- [ ] Inspect user role post-authentication: if role is `customer`, reject login with an explicit authorization error message and terminate the session.
-- [ ] Redirect authenticated `agent` or `admin` users directly to `/admin` dashboard.
+- [x] Create `src/app/admin/login/page.tsx` with dedicated staff login styling.
+- [x] Authenticate staff credentials using Better Auth.
+- [x] Inspect user role post-authentication: if role is `customer`, reject login with an explicit authorization error message and terminate the session (in `src/lib/staff-auth.ts`).
+- [x] Redirect authenticated `agent` or `admin` users directly to `/admin` dashboard (placeholder page guarded by `requireStaffPage`; ticket 12 fills it in).
