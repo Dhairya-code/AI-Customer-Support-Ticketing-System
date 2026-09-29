@@ -4,10 +4,10 @@
 
 **Blocked by:** 02: Neon Database and Drizzle ORM Schema Setup
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Install `better-auth` and `@better-auth/drizzle-adapter`.
-- [ ] Create `src/lib/auth.ts` configuring Better Auth instance with Drizzle adapter, email/password provider, and user role field.
-- [ ] Create `src/lib/auth-client.ts` exporting client auth methods (`signIn`, `signUp`, `signOut`, `useSession`).
-- [ ] Create API route handler `src/app/api/auth/[...all]/route.ts` bridging Better Auth endpoints.
-- [ ] Implement server-side session helper `getCurrentUser()` and role-guard helper `requireRole(["agent", "admin"])`.
+- [x] Install `better-auth` and `@better-auth/drizzle-adapter`.
+- [x] Create `src/lib/auth.ts` configuring Better Auth instance with Drizzle adapter, email/password provider, and user role field.
+- [x] Create `src/lib/auth-client.ts` exporting client auth methods (`signIn`, `signUp`, `signOut`, `useSession`).
+- [x] Create API route handler `src/app/api/auth/[...all]/route.ts` bridging Better Auth endpoints.
+- [x] Implement server-side session helper `getCurrentUser()` and role-guard helper `requireRole(["agent", "admin"])` (in `src/lib/session.ts`; throws `AuthError` with 401/403).
