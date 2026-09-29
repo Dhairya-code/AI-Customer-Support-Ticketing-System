@@ -4,13 +4,13 @@
 
 **Blocked by:** 01: Project Restructuring and Monorepo Cleanup
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Install `drizzle-orm`, `@neondatabase/serverless`, and `drizzle-kit` as dev dependency.
-- [ ] Create `drizzle.config.ts` targeting PostgreSQL schema and migrations directory.
-- [ ] Create `src/db/index.ts` initializing Drizzle client with `process.env.DATABASE_URL` via Neon HTTP driver.
-- [ ] Define tables in `src/db/schema.ts`:
+- [x] Install `drizzle-orm`, `@neondatabase/serverless`, and `drizzle-kit` as dev dependency.
+- [x] Create `drizzle.config.ts` targeting PostgreSQL schema and migrations directory.
+- [x] Create `src/db/index.ts` initializing Drizzle client with `process.env.DATABASE_URL` via Neon HTTP driver.
+- [x] Define tables in `src/db/schema.ts`:
   - Better Auth tables: `user` (with `role`: `"customer" | "agent" | "admin"`), `session`, `account`, `verification`.
   - `tickets` table with `id`, `userId`, `subject`, `category`, `priority`, `status`, `escalationReason`, `assignedToId`, `createdAt`, `updatedAt`.
   - `messages` table with `id`, `ticketId`, `senderId`, `senderType`, `content`, `isInternal`, `createdAt`.
-- [ ] Validate schema compilation and exports with TypeScript.
+- [x] Validate schema compilation and exports with TypeScript.

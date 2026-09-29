@@ -36,8 +36,8 @@ Following the fullstack Next.js migration decision (ADR 0001), we required clear
 
 ### 3. Threaded Message Model with Internal Notes
 - All messages in a ticket reside in a single `messages` table:
-  - `ticketId`: References `tickets.id`.
-  - `senderId`: References `users.id` (null for AI/System).
+  - `ticketId`: References `tickets.id`. Nullable — chat messages exist before escalation and are linked when the ticket is created.
+  - `senderId`: References `user.id` (null for AI/System).
   - `senderType`: `customer` | `agent` | `ai` | `system`.
   - `content`: Message text.
   - `isInternal`: Boolean flag.
