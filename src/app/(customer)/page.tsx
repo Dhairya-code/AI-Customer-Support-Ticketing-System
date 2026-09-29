@@ -83,7 +83,7 @@ export default function Home() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-100 p-4">
+    <main className="flex flex-1 items-center justify-center bg-gray-100 p-4">
       <div className="flex h-[700px] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
         {/* Header */}
         <header className="flex items-center justify-between border-b px-6 py-4">

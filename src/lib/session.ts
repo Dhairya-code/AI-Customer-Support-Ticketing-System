@@ -1,5 +1,6 @@
 import "server-only";
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { cache } from "react";
 import { USER_ROLES, type UserRole } from "@/db/schema";
 import { auth, type SessionUser } from "./auth";
@@ -19,6 +20,15 @@ export async function requireRole(
   allowed: readonly UserRole[],
 ): Promise<SessionUser> {
   return authorize(await getCurrentUser(), allowed);
+}
+
+// For pages only signed-out visitors need, such as /login and /register.
+// Called from pages rather than a layout because layouts don't re-run on
+// client-side navigation.
+export async function redirectIfSignedIn(): Promise<void> {
+  if (await getCurrentUser()) {
+    redirect("/");
+  }
 }
 
 // Any signed-in user, staff included.

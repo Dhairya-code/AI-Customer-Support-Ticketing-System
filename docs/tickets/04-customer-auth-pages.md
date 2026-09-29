@@ -4,9 +4,9 @@
 
 **Blocked by:** 03: Better Auth Integration and Role-Based Guards
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Create `src/app/(auth)/register/page.tsx` with name, email, password fields and automatic role assignment (`customer`).
-- [ ] Create `src/app/(auth)/login/page.tsx` with email and password fields, redirecting upon success.
-- [ ] Implement client-side form validation and clean error display (e.g. invalid credentials, already registered email).
-- [ ] Add navigation header with user profile indicator and Sign Out button for authenticated sessions.
+- [x] Create `src/app/(auth)/register/page.tsx` with name, email, password fields and automatic role assignment (`customer`).
+- [x] Create `src/app/(auth)/login/page.tsx` with email and password fields, redirecting upon success.
+- [x] Implement client-side form validation and clean error display (e.g. invalid credentials, already registered email) (in `src/lib/auth-forms.ts`).
+- [x] Add navigation header with user profile indicator and Sign Out button for authenticated sessions (`src/components/site-header.tsx`).
