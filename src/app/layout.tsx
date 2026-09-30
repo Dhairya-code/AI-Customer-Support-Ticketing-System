@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Customer Support",
+  title: { template: "%s | ResolveAI", default: "ResolveAI" },
   description: "AI-first customer support and ticketing",
 };
 

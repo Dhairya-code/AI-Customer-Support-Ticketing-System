@@ -41,6 +41,10 @@ function toValidationResult<T>(data: T, errors: FieldErrors<T>): ValidationResul
 // The subset of a Better Auth client `error` that the messages depend on.
 export type AuthClientError = { status: number; code?: string; message?: string };
 
+// Not a Better Auth code: settleAuthCall uses it for requests that got no
+// response at all.
+const NETWORK_ERROR = "NETWORK_ERROR";
+
 const ACCOUNT_EXISTS =
   "An account with this email already exists. Try signing in instead.";
 
@@ -51,7 +55,23 @@ const MESSAGES_BY_CODE: Record<string, string> = {
   INVALID_EMAIL,
   PASSWORD_TOO_SHORT,
   PASSWORD_TOO_LONG,
+  [NETWORK_ERROR]:
+    "Couldn't reach the server. Check your connection and try again.",
 };
+
+// The Better Auth client reports API errors in its result but rejects when the
+// request never reaches the server; this folds that case into the same result
+// shape, so a form can't be left stuck in its pending state.
+export async function settleAuthCall<R>(
+  call: Promise<R>,
+): Promise<R | { data: null; error: AuthClientError }> {
+  try {
+    return await call;
+  } catch (error) {
+    console.error("Auth request failed before reaching the server", error);
+    return { data: null, error: { status: 0, code: NETWORK_ERROR } };
+  }
+}
 
 // Server messages are never shown verbatim; unknown errors get a generic line.
 export function authErrorMessage(error: AuthClientError): string {

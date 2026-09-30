@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   authErrorMessage,
+  settleAuthCall,
   validateLogin,
   validateRegister,
 } from "./auth-forms";
@@ -63,6 +64,24 @@ describe("authErrorMessage", () => {
     expect(
       authErrorMessage({ status: 500, code: "SOMETHING_ODD", message: "boom" }),
     ).toBe("Something went wrong. Please try again.");
+  });
+});
+
+describe("settleAuthCall", () => {
+  it("passes the client's own result through", async () => {
+    const result = { data: { ok: true }, error: null };
+    await expect(settleAuthCall(Promise.resolve(result))).resolves.toBe(result);
+  });
+
+  it("turns a request that never reached the server into an error result", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { data, error } = await settleAuthCall(
+      Promise.reject(new TypeError("Failed to fetch")),
+    );
+    expect(data).toBeNull();
+    expect(error && authErrorMessage(error)).toBe(
+      "Couldn't reach the server. Check your connection and try again.",
+    );
   });
 });
 

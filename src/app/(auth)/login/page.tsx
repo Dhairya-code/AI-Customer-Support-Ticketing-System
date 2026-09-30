@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { LoginForm } from "@/components/auth/login-form";
 import { redirectIfSignedIn } from "@/lib/session";
 
-export const metadata: Metadata = { title: "Sign in | AI Customer Support" };
+export const metadata: Metadata = { title: "Sign in" };
 
 export default async function LoginPage() {
   await redirectIfSignedIn();

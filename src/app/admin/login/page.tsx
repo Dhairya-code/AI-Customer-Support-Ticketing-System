@@ -6,7 +6,7 @@ import { isStaff } from "@/lib/staff-auth";
 
 // Unlisted: nothing links here and search engines are asked to skip it.
 export const metadata: Metadata = {
-  title: "Staff sign in | AI Customer Support",
+  title: "Staff sign in",
   robots: { index: false, follow: false },
 };
 
@@ -22,7 +22,7 @@ export default async function StaffLoginPage() {
     <main className="flex flex-1 items-center justify-center bg-gray-950 p-4">
       <div className="w-full max-w-md">
         <p className="mb-4 text-center text-xs font-semibold tracking-widest text-gray-400 uppercase">
-          AI Support · Staff portal
+          ResolveAI · Staff portal
         </p>
         <div className="rounded-2xl bg-white p-8 shadow-2xl ring-1 ring-white/10">
           <h1 className="text-2xl font-bold text-gray-900">Staff sign in</h1>

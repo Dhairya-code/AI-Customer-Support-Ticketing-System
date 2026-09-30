@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { CustomerChat } from "@/components/chat/customer-chat";
 import { requireCustomerPage } from "@/lib/session";
 
-export const metadata: Metadata = { title: "Support chat | AI Customer Support" };
+export const metadata: Metadata = { title: "Support chat" };
 
 export default async function ChatPage() {
   const user = await requireCustomerPage();

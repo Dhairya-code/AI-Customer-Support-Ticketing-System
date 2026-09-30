@@ -3,7 +3,7 @@ import { RegisterForm } from "@/components/auth/register-form";
 import { redirectIfSignedIn } from "@/lib/session";
 
 export const metadata: Metadata = {
-  title: "Create account | AI Customer Support",
+  title: "Create account",
 };
 
 export default async function RegisterPage() {

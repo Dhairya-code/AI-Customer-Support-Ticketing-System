@@ -1,4 +1,4 @@
-# Context: AI Customer Support & Ticketing System
+# Context: ResolveAI — AI Customer Support & Ticketing System
 
 ## 1. Domain Vocabulary & Ubiquitous Language
 
@@ -53,7 +53,7 @@
 │   │   │   ├── login/page.tsx
 │   │   │   └── register/page.tsx
 │   │   ├── (customer)/
-│   │   │   ├── page.tsx               ← AI Support Chat
+│   │   │   ├── page.tsx               ← Support Chat
 │   │   │   └── tickets/
 │   │   │       ├── page.tsx           ← Customer "My Tickets"
 │   │   │       └── [id]/page.tsx      ← Ticket Thread & Chat History

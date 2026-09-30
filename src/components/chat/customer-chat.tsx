@@ -118,7 +118,7 @@ export function CustomerChat({ customerName }: { customerName: string }) {
     <div className="flex h-[min(700px,calc(100dvh-8rem))] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
       <header className="flex items-center justify-between border-b px-6 py-4">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">AI Support</h1>
+          <h1 className="text-xl font-bold text-gray-900">ResolveAI</h1>
           <div className="mt-1 flex items-center gap-2 text-sm text-gray-500">
             <span className="h-2 w-2 rounded-full bg-green-500" />
             Online

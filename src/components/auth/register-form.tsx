@@ -6,6 +6,7 @@ import { type FormEvent, useState } from "react";
 import { signUp } from "@/lib/auth-client";
 import {
   authErrorMessage,
+  settleAuthCall,
   type FieldErrors,
   MIN_PASSWORD_LENGTH,
   type RegisterInput,
@@ -41,7 +42,7 @@ export function RegisterForm() {
     setPending(true);
 
     // No role is sent: the server assigns `customer` and rejects client input.
-    const { error } = await signUp.email(validation.data);
+    const { error } = await settleAuthCall(signUp.email(validation.data));
     if (error) {
       setFormError(authErrorMessage(error));
       setPending(false);

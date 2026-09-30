@@ -5,6 +5,7 @@ import { type FormEvent, useState } from "react";
 import { signIn, signOut } from "@/lib/auth-client";
 import {
   authErrorMessage,
+  settleAuthCall,
   type FieldErrors,
   type LoginInput,
   validateLogin,
@@ -36,7 +37,9 @@ export function StaffLoginForm() {
     setFieldErrors({});
     setPending(true);
 
-    const { data, error } = await signIn.email(validation.data);
+    const { data, error } = await settleAuthCall(
+      signIn.email(validation.data),
+    );
     if (error) {
       setFormError(authErrorMessage(error));
       setPending(false);

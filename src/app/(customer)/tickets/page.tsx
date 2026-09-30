@@ -9,7 +9,7 @@ import {
 import { requireCustomerPage } from "@/lib/session";
 import { listCustomerTickets, type CustomerTicketSummary } from "@/lib/tickets";
 
-export const metadata: Metadata = { title: "My tickets | AI Customer Support" };
+export const metadata: Metadata = { title: "My tickets" };
 
 export default async function MyTicketsPage() {
   const user = await requireCustomerPage();
@@ -55,7 +55,7 @@ function TicketCard({ ticket }: { ticket: CustomerTicketSummary }) {
       href={`/tickets/${ticket.id}`}
       className="block rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200 transition hover:shadow-md hover:ring-gray-300"
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <p className="text-xs font-medium text-gray-500">Ticket #{ticket.id}</p>
           <h2 className="mt-0.5 truncate font-semibold text-gray-900">

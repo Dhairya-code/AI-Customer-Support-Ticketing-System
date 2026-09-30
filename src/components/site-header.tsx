@@ -11,7 +11,7 @@ export async function SiteHeader() {
       <nav className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
         <div className="flex items-center gap-4">
           <Link href="/" className="text-lg font-bold text-gray-900">
-            AI Support
+            ResolveAI
           </Link>
           {user?.role === "customer" && <CustomerNav />}
         </div>

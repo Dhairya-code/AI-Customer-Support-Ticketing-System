@@ -24,7 +24,7 @@ import {
 } from "@/lib/staff-tickets";
 
 export const metadata: Metadata = {
-  title: "Staff dashboard | AI Customer Support",
+  title: "Staff dashboard",
   robots: { index: false, follow: false },
 };
 

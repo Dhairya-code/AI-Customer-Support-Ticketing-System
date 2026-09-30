@@ -21,7 +21,7 @@ export async function generateMetadata({
   params,
 }: PageProps<"/tickets/[id]">): Promise<Metadata> {
   const { id } = await params;
-  return { title: `Ticket #${id} | AI Customer Support` };
+  return { title: `Ticket #${id}` };
 }
 
 export default async function TicketThreadPage({
@@ -46,7 +46,7 @@ export default async function TicketThreadPage({
 
         <div className="mt-4 overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-gray-200">
           <header className="border-b p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
               <div className="min-w-0">
                 <p className="text-xs font-medium text-gray-500">Ticket #{ticket.id}</p>
                 <h1 className="mt-0.5 text-xl font-bold wrap-break-word text-gray-900">
