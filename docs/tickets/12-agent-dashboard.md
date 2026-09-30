@@ -4,10 +4,12 @@
 
 **Blocked by:** 05: Discreet Staff Authentication Page, 08: Autonomous AI Ticket Escalation via Tool Calling
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Create `src/app/admin/page.tsx` protected by role guard (`agent` or `admin`).
-- [ ] Display aggregate metric cards (Total Tickets, Open Tickets, High/Critical Tickets, Resolved Tickets).
-- [ ] Build ticket table with customer name, email, subject, category, priority, status, and creation date.
-- [ ] Add client-side or searchParam filters for Status (`open`, `in_progress`, `resolved`, `closed`), Priority, and Category.
-- [ ] Make table rows clickable, linking directly to `/admin/tickets/[id]`.
+- [x] Create `src/app/admin/page.tsx` protected by role guard (`agent` or `admin`) (`requireStaffPage`: anyone else lands on `/admin/login`).
+- [x] Display aggregate metric cards (Total Tickets, Open Tickets, High/Critical Tickets, Resolved Tickets) (`getQueueMetrics` in `src/lib/ticket-queue.ts`; counts the whole queue regardless of filters).
+- [x] Build ticket table with customer name, email, subject, category, priority, status, and creation date (`listQueueTickets`, newest first).
+- [x] Add client-side or searchParam filters for Status (`open`, `in_progress`, `resolved`, `closed`), Priority, and Category (searchParams via a plain GET form; unknown values are ignored by `parseQueueFilters`).
+- [x] Make table rows clickable, linking directly to `/admin/tickets/[id]`.
+
+**Notes for later tickets:** "Open Tickets" counts `status = open` only, not `in_progress`; "High/Critical" counts every status. Rows link to `/admin/tickets/[id]`, which 404s until ticket 13 lands. The legacy `src/app/agent/page.tsx` (fetches from the old Python backend) is now superseded by `/admin`.
