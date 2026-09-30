@@ -1,9 +1,12 @@
 import {
   GenerateContentResponse,
+  type Content,
   type GenerateContentParameters,
   type Part,
 } from "@google/genai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
+import { messages, tickets, user } from "@/db/schema";
 import { SUPPORT_SYSTEM_INSTRUCTION } from "@/lib/knowledge-base";
 
 const getSession = vi.hoisted(() => vi.fn());
@@ -17,12 +20,46 @@ vi.mock("@/lib/gemini", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/gemini")>()),
   getGeminiClient: () => ({ models: { generateContent } }),
 }));
+// A real Postgres (in-memory PGlite) with the app's migrations applied stands
+// in for Neon, so ticket writes are checked against the actual schema.
+vi.mock("@/db", async () => {
+  const { PGlite } = await import("@electric-sql/pglite");
+  const { drizzle } = await import("drizzle-orm/pglite");
+  const { migrate } = await import("drizzle-orm/pglite/migrator");
+  const schema = await import("@/db/schema");
+  const db = drizzle({ client: new PGlite(), schema });
+  await migrate(db, { migrationsFolder: "drizzle" });
+  return { db };
+});
 
 const { POST } = await import("./route");
+const { db } = await import("@/db");
 
-const customer = { id: "c1", name: "Casey", email: "c@example.com", role: "customer" };
+const customer = {
+  id: "c1",
+  name: "Casey",
+  email: "c@example.com",
+  role: "customer",
+} satisfies typeof user.$inferInsert;
 
-function signInAs(user: typeof customer | null) {
+await db.insert(user).values(customer);
+
+const ticketArgs = {
+  subject: "Charged twice for order #1001",
+  category: "payment",
+  priority: "high",
+  escalationReason: "Customer was charged twice and wants the duplicate refunded.",
+};
+
+function createTicketCall(args: Record<string, unknown> = ticketArgs): Part {
+  return { functionCall: { id: "call-1", name: "create_ticket", args } };
+}
+
+async function allTickets() {
+  return db.select().from(tickets).orderBy(tickets.id);
+}
+
+function signInAs(user: { id: string; role: string } | null) {
   getSession.mockResolvedValue(user ? { user, session: {} } : null);
 }
 
@@ -40,9 +77,10 @@ function chatRequest(body: unknown): Request {
   });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   getSession.mockReset();
   generateContent.mockReset();
+  await db.delete(tickets); // cascades to their messages
 });
 
 afterEach(() => {
@@ -155,47 +193,15 @@ describe("POST /api/chat", () => {
     expect(response.status).toBe(502);
   });
 
-  it("does not raise a ticket yet when the model escalates; the model explains instead", async () => {
-    signInAs(customer);
-    generateContent
-      .mockResolvedValueOnce(
-        modelReply({
-          functionCall: {
-            name: "create_ticket",
-            args: {
-              subject: "Charged twice",
-              category: "payment",
-              priority: "high",
-              escalationReason: "Duplicate charge.",
-            },
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        modelReply({ text: "Sorry, I couldn't create a ticket right now." }),
-      );
-
-    const response = await POST(
-      chatRequest({ messages: [{ role: "user", text: "I was charged twice!" }] }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      reply: "Sorry, I couldn't create a ticket right now.",
-    });
-    const toolResponse = generateContent.mock.calls[1][0].contents;
-    expect(JSON.stringify(toolResponse)).toMatch(/"error"/);
-  });
-
   it("sends Gemini only the recent turns of a long conversation, opening on a customer turn", async () => {
     signInAs(customer);
     generateContent.mockResolvedValue(modelReply({ text: "Sure." }));
-    const messages = Array.from({ length: 25 }, (_, i) => ({
+    const turns = Array.from({ length: 25 }, (_, i) => ({
       role: i % 2 === 0 ? "user" : "model",
       text: `turn ${i + 1}`,
     }));
 
-    const response = await POST(chatRequest({ messages }));
+    const response = await POST(chatRequest({ messages: turns }));
 
     expect(response.status).toBe(200);
     const contents = generateContent.mock.calls[0][0].contents as unknown[];
@@ -203,5 +209,158 @@ describe("POST /api/chat", () => {
     expect(contents).toHaveLength(19);
     expect(contents[0]).toEqual({ role: "user", parts: [{ text: "turn 7" }] });
     expect(contents[18]).toEqual({ role: "user", parts: [{ text: "turn 25" }] });
+  });
+});
+
+describe("POST /api/chat escalation", () => {
+  it("creates an open ticket with the transcript when the model calls create_ticket", async () => {
+    signInAs(customer);
+    generateContent
+      .mockResolvedValueOnce(modelReply(createTicketCall()))
+      .mockImplementationOnce(async () => {
+        const [ticket] = await allTickets();
+        return modelReply({ text: `I've opened ticket #${ticket.id} for you.` });
+      });
+
+    const response = await POST(
+      chatRequest({
+        messages: [
+          { role: "user", text: "I was charged twice for order #1001" },
+          { role: "model", text: "Sorry to hear that. Can you confirm the amount?" },
+          { role: "user", text: "$40, twice. I want a human." },
+        ],
+      }),
+    );
+
+    const [ticket, ...others] = await allTickets();
+    expect(others).toEqual([]);
+    expect(ticket).toMatchObject({
+      userId: customer.id,
+      subject: ticketArgs.subject,
+      category: "payment",
+      priority: "high",
+      status: "open",
+      escalationReason: ticketArgs.escalationReason,
+    });
+
+    const transcript = await db
+      .select()
+      .from(messages)
+      .where(eq(messages.ticketId, ticket.id))
+      .orderBy(messages.id);
+    expect(transcript).toMatchObject([
+      { senderType: "customer", senderId: customer.id, content: "I was charged twice for order #1001", isInternal: false },
+      { senderType: "ai", senderId: null, content: "Sorry to hear that. Can you confirm the amount?", isInternal: false },
+      { senderType: "customer", senderId: customer.id, content: "$40, twice. I want a human.", isInternal: false },
+      // The confirmation the customer saw closes the thread.
+      { senderType: "ai", senderId: null, content: `I've opened ticket #${ticket.id} for you.`, isInternal: false },
+    ]);
+
+    // Gemini is told the new ticket's id so it can confirm it to the customer.
+    const toolTurn = generateContent.mock.calls[1][0].contents as Content[];
+    expect(toolTurn.at(-1)).toEqual({
+      role: "user",
+      parts: [
+        {
+          functionResponse: {
+            id: "call-1",
+            name: "create_ticket",
+            response: { output: { ticketId: ticket.id, status: "created" } },
+          },
+        },
+      ],
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      reply: `I've opened ticket #${ticket.id} for you.`,
+      ticket: { id: ticket.id },
+    });
+  });
+
+  it("writes nothing and lets the model explain when its ticket details are invalid", async () => {
+    signInAs(customer);
+    generateContent
+      .mockResolvedValueOnce(
+        modelReply(createTicketCall({ ...ticketArgs, category: "billing" })),
+      )
+      .mockResolvedValueOnce(
+        modelReply({ text: "Sorry, I couldn't create a ticket just now." }),
+      );
+
+    const response = await POST(
+      chatRequest({ messages: [{ role: "user", text: "Get me a human" }] }),
+    );
+
+    expect(await allTickets()).toEqual([]);
+    expect(await db.select().from(messages)).toEqual([]);
+    const toolTurn = generateContent.mock.calls[1][0].contents as Content[];
+    expect(toolTurn.at(-1)?.parts?.[0].functionResponse?.response).toEqual({
+      error: expect.stringMatching(/category/),
+    });
+    expect(await response.json()).toEqual({
+      reply: "Sorry, I couldn't create a ticket just now.",
+    });
+  });
+
+  it("opens only one ticket when the model calls create_ticket again in the same turn", async () => {
+    signInAs(customer);
+    generateContent
+      .mockResolvedValueOnce(modelReply(createTicketCall()))
+      .mockResolvedValueOnce(modelReply(createTicketCall()))
+      .mockResolvedValueOnce(modelReply({ text: "Your ticket is open." }));
+
+    const response = await POST(
+      chatRequest({ messages: [{ role: "user", text: "I want a human" }] }),
+    );
+
+    const [ticket, ...others] = await allTickets();
+    expect(others).toEqual([]);
+    const secondToolTurn = generateContent.mock.calls[2][0].contents as Content[];
+    expect(
+      secondToolTurn.at(-1)?.parts?.[0].functionResponse?.response,
+    ).toEqual({ output: { ticketId: ticket.id, status: "created" } });
+    expect(await response.json()).toEqual({
+      reply: "Your ticket is open.",
+      ticket: { id: ticket.id },
+    });
+  });
+
+  it("still confirms the ticket when Gemini fails after creating it", async () => {
+    signInAs(customer);
+    generateContent
+      .mockResolvedValueOnce(modelReply(createTicketCall()))
+      .mockRejectedValueOnce(new Error("503 UNAVAILABLE"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await POST(
+      chatRequest({ messages: [{ role: "user", text: "I want a human" }] }),
+    );
+
+    // A 502 here would invite the customer to retry and open a duplicate.
+    const [ticket] = await allTickets();
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.ticket).toEqual({ id: ticket.id });
+    expect(body.reply).toContain(`#${ticket.id}`);
+  });
+
+  it("saves the whole conversation to the ticket, not just the turns sent to Gemini", async () => {
+    signInAs(customer);
+    generateContent
+      .mockResolvedValueOnce(modelReply(createTicketCall()))
+      .mockResolvedValueOnce(modelReply({ text: "Ticket opened." }));
+    const turns = Array.from({ length: 25 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "model",
+      text: `turn ${i + 1}`,
+    }));
+
+    await POST(chatRequest({ messages: turns }));
+
+    const saved = await db.select().from(messages).orderBy(messages.id);
+    expect(saved.map((message) => message.content)).toEqual([
+      ...turns.map((turn) => turn.text),
+      "Ticket opened.",
+    ]);
   });
 });

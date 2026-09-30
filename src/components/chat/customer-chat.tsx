@@ -1,17 +1,20 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  Fragment,
   type FormEvent,
   type KeyboardEvent,
   useEffect,
   useRef,
   useState,
 } from "react";
-import { MAX_MESSAGE_LENGTH } from "@/lib/chat";
+import { type ChatResponse, MAX_MESSAGE_LENGTH } from "@/lib/chat";
 import type { ChatTurn } from "@/lib/gemini";
 
-type ChatMessage = ChatTurn & { id: number };
+// ticketId marks the reply on which the AI escalated to a ticket.
+type ChatMessage = ChatTurn & { id: number; ticketId?: number };
 
 const FALLBACK_ERROR = "Something went wrong. Please try again.";
 
@@ -58,19 +61,18 @@ export function CustomerChat({ customerName }: { customerName: string }) {
         return;
       }
 
-      const data = (await response.json().catch(() => null)) as {
-        reply?: string;
-        error?: string;
-      } | null;
+      const data = (await response.json().catch(() => null)) as
+        | (Partial<ChatResponse> & { error?: string })
+        | null;
 
       if (!response.ok || !data?.reply) {
         throw new Error(data?.error || FALLBACK_ERROR);
       }
 
-      const reply = data.reply;
+      const { reply, ticket } = data;
       setMessages((current) => [
         ...current,
-        { id: nextId++, role: "model", text: reply },
+        { id: nextId++, role: "model", text: reply, ticketId: ticket?.id },
       ]);
     } catch (caught) {
       // Take the unanswered message back out of the transcript and return it
@@ -103,6 +105,13 @@ export function CustomerChat({ customerName }: { customerName: string }) {
     }
   }
 
+  function startNewChat() {
+    setMessages([]);
+    setInput("");
+    setError(null);
+  }
+
+  const escalated = messages.some((message) => message.ticketId !== undefined);
   const firstName = customerName.trim().split(/\s+/)[0];
 
   return (
@@ -130,9 +139,12 @@ export function CustomerChat({ customerName }: { customerName: string }) {
         </Bubble>
 
         {messages.map((message) => (
-          <Bubble key={message.id} role={message.role}>
-            {message.text}
-          </Bubble>
+          <Fragment key={message.id}>
+            <Bubble role={message.role}>{message.text}</Bubble>
+            {message.ticketId !== undefined && (
+              <TicketCreatedBanner ticketId={message.ticketId} />
+            )}
+          </Fragment>
         ))}
 
         {pending && (
@@ -152,41 +164,58 @@ export function CustomerChat({ customerName }: { customerName: string }) {
         <div ref={bottomRef} />
       </section>
 
-      <form onSubmit={handleSubmit} className="border-t bg-white p-4">
-        {error && (
-          <p
-            role="alert"
-            className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700"
-          >
-            {error}
+      {escalated ? (
+        // One ticket per conversation: once escalated, the chat ends so later
+        // messages can't open a duplicate or go unseen by the agent.
+        <div className="flex flex-col items-center gap-3 border-t bg-white p-4 text-center sm:flex-row sm:justify-between sm:text-left">
+          <p className="text-sm text-gray-600">
+            This conversation has been handed to our support team.
           </p>
-        )}
-        <div className="flex items-end gap-3">
-          <label htmlFor="chat-input" className="sr-only">
-            Message
-          </label>
-          <textarea
-            ref={inputRef}
-            id="chat-input"
-            rows={1}
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={handleKeyDown}
-            maxLength={MAX_MESSAGE_LENGTH}
-            placeholder="Ask a question or describe your problem..."
-            disabled={pending}
-            autoFocus
-            className="max-h-40 flex-1 resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm text-black outline-none field-sizing-content placeholder:text-gray-400 focus:border-black disabled:bg-gray-100"
-          />
           <button
-            type="submit"
-            disabled={pending || !input.trim()}
-            className="rounded-xl bg-black px-5 py-3 text-sm font-medium text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+            type="button"
+            onClick={startNewChat}
+            className="shrink-0 rounded-xl border border-gray-300 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-100"
           >
-            {pending ? "Sending..." : "Send"}
+            Start a new chat
           </button>
         </div>
-      </form>
+      ) : (
+        <form onSubmit={handleSubmit} className="border-t bg-white p-4">
+          {error && (
+            <p
+              role="alert"
+              className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700"
+            >
+              {error}
+            </p>
+          )}
+          <div className="flex items-end gap-3">
+            <label htmlFor="chat-input" className="sr-only">
+              Message
+            </label>
+            <textarea
+              ref={inputRef}
+              id="chat-input"
+              rows={1}
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={handleKeyDown}
+              maxLength={MAX_MESSAGE_LENGTH}
+              placeholder="Ask a question or describe your problem..."
+              disabled={pending}
+              autoFocus
+              className="max-h-40 flex-1 resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm text-black outline-none field-sizing-content placeholder:text-gray-400 focus:border-black disabled:bg-gray-100"
+            />
+            <button
+              type="submit"
+              disabled={pending || !input.trim()}
+              className="rounded-xl bg-black px-5 py-3 text-sm font-medium text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {pending ? "Sending..." : "Send"}
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }
@@ -212,6 +241,38 @@ function Bubble({
         <span className="sr-only">{fromCustomer ? "You: " : "Assistant: "}</span>
         {children}
       </div>
+    </div>
+  );
+}
+
+function TicketCreatedBanner({ ticketId }: { ticketId: number }) {
+  return (
+    <div
+      role="status"
+      className="mx-auto flex max-w-md items-center justify-between gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3"
+    >
+      <div className="flex items-center gap-3">
+        <span
+          aria-hidden
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-sm text-white"
+        >
+          ✓
+        </span>
+        <div>
+          <p className="text-sm font-semibold text-emerald-900">
+            Ticket Created #{ticketId}
+          </p>
+          <p className="text-xs text-emerald-800">
+            A support agent will follow up with you.
+          </p>
+        </div>
+      </div>
+      <Link
+        href={`/tickets/${ticketId}`}
+        className="shrink-0 rounded-xl bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-800"
+      >
+        View ticket
+      </Link>
     </div>
   );
 }

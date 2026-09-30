@@ -1,19 +1,25 @@
+import type { SessionUser } from "@/lib/auth";
+import { parseChatRequest, type ChatResponse } from "@/lib/chat";
 import {
   CREATE_TICKET_TOOL,
   getGeminiClient,
+  parseCreateTicketArgs,
   runConversation,
+  type ToolCall,
+  type ToolResult,
 } from "@/lib/gemini";
-import { parseChatRequest } from "@/lib/chat";
 import { SUPPORT_SYSTEM_INSTRUCTION } from "@/lib/knowledge-base";
 import { AuthError, requireRole } from "@/lib/session";
+import { appendAiReply, createTicketFromChat } from "@/lib/tickets";
 
 const AI_UNAVAILABLE_MESSAGE =
   "Our assistant is having trouble responding right now. Please try again in a moment.";
 
 export async function POST(request: Request): Promise<Response> {
   // Customers only: tickets escalated from chat are raised on their behalf.
+  let customer: SessionUser;
   try {
-    await requireRole(["customer"]);
+    customer = await requireRole(["customer"]);
   } catch (error) {
     if (error instanceof AuthError) {
       return Response.json({ error: error.message }, { status: error.status });
@@ -31,19 +37,41 @@ export async function POST(request: Request): Promise<Response> {
   if (!parsed.ok) {
     return Response.json({ error: parsed.error }, { status: 400 });
   }
+  const { transcript, history } = parsed;
+
+  let ticketId: number | undefined;
+
+  // Errors thrown here are relayed to the model, which tells the customer, so
+  // their messages must be customer-safe.
+  async function handleToolCall({ name, args }: ToolCall): Promise<ToolResult> {
+    if (name !== CREATE_TICKET_TOOL.name) {
+      throw new Error(`Unknown tool "${name}"`);
+    }
+    // A repeat call in the same turn gets the existing ticket, not a duplicate.
+    if (ticketId === undefined) {
+      const details = parseCreateTicketArgs(args);
+      try {
+        ({ ticketId } = await createTicketFromChat({
+          customerId: customer.id,
+          details,
+          transcript,
+        }));
+      } catch (error) {
+        console.error("Ticket creation failed", error);
+        throw new Error("The ticket could not be saved");
+      }
+    }
+    return { ticketId, status: "created" };
+  }
 
   let reply: string;
   try {
     const { text } = await runConversation({
       ai: getGeminiClient(),
-      history: parsed.history,
+      history,
       systemInstruction: SUPPORT_SYSTEM_INSTRUCTION,
       tools: [CREATE_TICKET_TOOL],
-      // Ticket creation lands with ticket 08; until then the model is told the
-      // tool failed, which the system instruction has it explain to the customer.
-      onToolCall: async () => {
-        throw new Error("Ticket creation is temporarily unavailable");
-      },
+      onToolCall: handleToolCall,
     });
     reply = text.trim();
     // An empty answer (e.g. a blocked response) is no use to the customer.
@@ -51,8 +79,24 @@ export async function POST(request: Request): Promise<Response> {
   } catch (error) {
     // Details stay in the server log; the customer gets a generic message.
     console.error("Chat turn failed", error);
-    return Response.json({ error: AI_UNAVAILABLE_MESSAGE }, { status: 502 });
+    if (ticketId === undefined) {
+      return Response.json({ error: AI_UNAVAILABLE_MESSAGE }, { status: 502 });
+    }
+    // The ticket exists, so confirm it: an error would invite a retry that
+    // opens a duplicate.
+    reply = `I've opened support ticket #${ticketId} for you. A member of our support team will follow up with you.`;
   }
 
-  return Response.json({ reply });
+  if (ticketId === undefined) {
+    return Response.json({ reply } satisfies ChatResponse);
+  }
+
+  try {
+    await appendAiReply(ticketId, reply);
+  } catch (error) {
+    // The ticket and transcript are saved; losing the confirmation line is
+    // not worth failing the customer's turn over.
+    console.error("Saving the escalation reply failed", error);
+  }
+  return Response.json({ reply, ticket: { id: ticketId } } satisfies ChatResponse);
 }
