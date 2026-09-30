@@ -11,12 +11,14 @@ import type { SenderType } from "@/db/schema";
 import { requireStaffPage } from "@/lib/session";
 import {
   getStaffTicketDetail,
+  listStaffMembers,
   type StaffThreadMessage,
   type StaffTicket,
   type StaffTicketCustomer,
 } from "@/lib/staff-tickets";
 import { acceptsReplies, parseTicketId } from "@/lib/tickets";
 import { StaffReplyForm } from "./staff-reply-form";
+import { TicketControls } from "./ticket-controls";
 
 export async function generateMetadata({
   params,
@@ -33,7 +35,11 @@ export default async function StaffTicketPage({
 }: PageProps<"/admin/tickets/[id]">) {
   await requireStaffPage();
   const ticketId = parseTicketId((await params).id);
-  const detail = ticketId && (await getStaffTicketDetail(ticketId));
+  if (!ticketId) notFound();
+  const [detail, staff] = await Promise.all([
+    getStaffTicketDetail(ticketId),
+    listStaffMembers(),
+  ]);
   if (!detail) notFound();
   const { ticket, customer, messages } = detail;
 
@@ -74,7 +80,10 @@ export default async function StaffTicketPage({
             />
           </div>
 
-          <CustomerProfile customer={customer} />
+          <div className="space-y-6">
+            <TicketControls ticket={ticket} staff={staff} />
+            <CustomerProfile customer={customer} />
+          </div>
         </div>
       </div>
     </main>

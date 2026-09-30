@@ -70,6 +70,7 @@
 │   │   └── globals.css
 │   ├── components/                    ← Reusable UI (Chat, Navbar, Badges, Modals)
 │   ├── db/
+│   │   ├── enums.ts                   ← Status/priority/category/role values (client-safe)
 │   │   ├── index.ts                   ← Drizzle client (Neon HTTP)
 │   │   └── schema.ts                  ← Users, Sessions, Tickets, Messages
 │   ├── lib/

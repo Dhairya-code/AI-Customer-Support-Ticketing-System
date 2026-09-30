@@ -14,8 +14,11 @@ import {
   type TicketCategory,
   type TicketPriority,
   type TicketStatus,
+  type UserRole,
 } from "@/db/schema";
 import { MAX_MESSAGE_LENGTH } from "./chat";
+import { STAFF_ROLES } from "./staff-auth";
+import { statusLabel } from "./ticket-labels";
 import { CLOSED_STATUS } from "./tickets";
 
 // Staff views of tickets: the triage queue at /admin and the ticket page at
@@ -30,13 +33,21 @@ export interface QueueFilters {
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
+// For values from URLs and Server Action arguments.
+export function isOneOf<T extends string>(
+  allowed: readonly T[],
+  value: unknown,
+): value is T {
+  return (allowed as readonly unknown[]).includes(value);
+}
+
 function parseEnumParam<T extends string>(
   allowed: readonly T[],
   raw: string | string[] | undefined,
 ): T | undefined {
   const value = Array.isArray(raw) ? raw[0] : raw;
-  return (allowed as readonly string[]).includes(value ?? "")
-    ? (value as T)
+  return isOneOf(allowed, value)
+    ? value
     : undefined;
 }
 
@@ -122,6 +133,7 @@ export type StaffTicket = Pick<
   | "priority"
   | "status"
   | "escalationReason"
+  | "assignedToId"
   | "createdAt"
   | "updatedAt"
 >;
@@ -163,6 +175,7 @@ export async function getStaffTicketDetail(
         priority: tickets.priority,
         status: tickets.status,
         escalationReason: tickets.escalationReason,
+        assignedToId: tickets.assignedToId,
         createdAt: tickets.createdAt,
         updatedAt: tickets.updatedAt,
       },
@@ -213,6 +226,19 @@ export async function getStaffTicketDetail(
   };
 }
 
+// The outcome of a staff change; errors are shown to the agent as-is.
+export type StaffActionResult = { ok: true } | { ok: false; error: string };
+
+const TICKET_NOT_FOUND = "This ticket could not be found.";
+
+async function ticketExists(ticketId: number): Promise<boolean> {
+  const [ticket] = await db
+    .select({ id: tickets.id })
+    .from(tickets)
+    .where(eq(tickets.id, ticketId));
+  return Boolean(ticket);
+}
+
 // A public reply goes to the customer; an internal note is for staff only.
 export const STAFF_MESSAGE_KINDS = ["reply", "note"] as const;
 export type StaffMessageKind = (typeof STAFF_MESSAGE_KINDS)[number];
@@ -227,7 +253,7 @@ export interface StaffMessageInput {
 export type StaffMessageResult =
   // The ticket's customer, for the reply notification email.
   | { ok: true; customer: { name: string; email: string } }
-  | { ok: false; error: string };
+  | Extract<StaffActionResult, { ok: false }>;
 
 // An agent's public reply or internal note on any ticket. Errors are shown to
 // the agent as-is.
@@ -263,15 +289,11 @@ export async function addStaffMessage({
     )
     .returning({ name: user.name, email: user.email });
   if (!customer) {
-    const [ticket] = await db
-      .select({ id: tickets.id })
-      .from(tickets)
-      .where(eq(tickets.id, ticketId));
     return {
       ok: false,
-      error: ticket
+      error: (await ticketExists(ticketId))
         ? "This ticket is closed, so it takes internal notes only."
-        : "This ticket could not be found.",
+        : TICKET_NOT_FOUND,
     };
   }
 
@@ -283,4 +305,128 @@ export async function addStaffMessage({
     isInternal,
   });
   return { ok: true, customer };
+}
+
+export interface StaffMember {
+  id: string;
+  name: string;
+  role: UserRole;
+}
+
+// Everyone a ticket can be assigned to, by name.
+export async function listStaffMembers(): Promise<StaffMember[]> {
+  const rows = await db
+    .select({ id: user.id, name: user.name, role: user.role })
+    .from(user)
+    .where(inArray(user.role, STAFF_ROLES))
+    .orderBy(asc(user.name), asc(user.id));
+  // role is nullable in the schema, but the filter only keeps staff roles.
+  return rows as StaffMember[];
+}
+
+export interface TicketStatusChange {
+  // Named in the system message the change leaves in the thread.
+  agent: { id: string; name: string };
+  ticketId: number;
+  status: TicketStatus;
+}
+
+// Moves a ticket between open, in progress and resolved, in any direction, or
+// closes it, and notes the change in the thread, where the customer sees it
+// too. Closing is final (CONTEXT.md: "finalized and locked"). Setting the
+// status a ticket already has changes nothing.
+export async function setTicketStatus({
+  agent,
+  ticketId,
+  status,
+}: TicketStatusChange): Promise<StaffActionResult> {
+  // Guarded on the old status, so two agents making the same change at once
+  // leave one system message between them, and a ticket closed a moment
+  // earlier stays closed.
+  const changed = await db
+    .update(tickets)
+    .set({ status })
+    .where(
+      and(
+        eq(tickets.id, ticketId),
+        ne(tickets.status, status),
+        ne(tickets.status, CLOSED_STATUS),
+      ),
+    )
+    .returning({ id: tickets.id });
+  if (changed.length === 0) {
+    const [ticket] = await db
+      .select({ status: tickets.status })
+      .from(tickets)
+      .where(eq(tickets.id, ticketId));
+    if (!ticket) return { ok: false, error: TICKET_NOT_FOUND };
+    return ticket.status === status
+      ? { ok: true }
+      : { ok: false, error: "This ticket is closed, so its status can't change." };
+  }
+
+  // neon-http has no transactions, so this is a second write: should it fail,
+  // the status has still changed, just without its note in the thread.
+  await db.insert(messages).values({
+    ticketId,
+    senderType: "system",
+    content: `Ticket marked as ${statusLabel(status)} by ${agent.name}`,
+  });
+  return { ok: true };
+}
+
+export interface TicketTriage {
+  priority?: TicketPriority;
+  category?: TicketCategory;
+  // Null unassigns the ticket.
+  assignedToId?: string | null;
+}
+
+// Triage changes arrive as Server Action arguments, so anything malformed,
+// unknown or empty is rejected as a whole rather than partly applied.
+export function parseTicketTriage(raw: unknown): TicketTriage | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const entries = Object.entries(raw);
+  if (entries.length === 0) return null;
+
+  const changes: TicketTriage = {};
+  for (const [field, value] of entries) {
+    if (field === "priority" && isOneOf(TICKET_PRIORITIES, value)) {
+      changes.priority = value;
+    } else if (field === "category" && isOneOf(TICKET_CATEGORIES, value)) {
+      changes.category = value;
+    } else if (
+      field === "assignedToId" &&
+      (value === null || (typeof value === "string" && value !== ""))
+    ) {
+      changes.assignedToId = value;
+    } else {
+      return null;
+    }
+  }
+  return changes;
+}
+
+// Updates whichever of priority, category and assignee are given (at least
+// one; see parseTicketTriage). Tickets can only be assigned to staff.
+export async function updateTicketTriage(
+  ticketId: number,
+  changes: TicketTriage,
+): Promise<StaffActionResult> {
+  if (changes.assignedToId) {
+    const [assignee] = await db
+      .select({ id: user.id })
+      .from(user)
+      .where(and(eq(user.id, changes.assignedToId), inArray(user.role, STAFF_ROLES)));
+    if (!assignee) {
+      return { ok: false, error: "Tickets can only be assigned to support staff." };
+    }
+  }
+
+  const updated = await db
+    .update(tickets)
+    .set(changes)
+    .where(eq(tickets.id, ticketId))
+    .returning({ id: tickets.id });
+  return updated.length > 0 ? { ok: true } : { ok: false, error: TICKET_NOT_FOUND };
 }

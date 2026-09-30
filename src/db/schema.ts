@@ -9,25 +9,21 @@ import {
   timestamp,
   varchar,
 } from "drizzle-orm/pg-core";
+import {
+  SENDER_TYPES,
+  TICKET_CATEGORIES,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  USER_ROLES,
+} from "./enums";
 
-export const USER_ROLES = ["customer", "agent", "admin"] as const;
-export const TICKET_CATEGORIES = [
-  "payment",
-  "order",
-  "delivery",
-  "account",
-  "technical",
-  "refund",
-  "other",
-] as const;
-export const TICKET_PRIORITIES = ["low", "medium", "high", "critical"] as const;
-export const TICKET_STATUSES = [
-  "open",
-  "in_progress",
-  "resolved",
-  "closed",
-] as const;
-export const SENDER_TYPES = ["customer", "agent", "ai", "system"] as const;
+export {
+  SENDER_TYPES,
+  TICKET_CATEGORIES,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  USER_ROLES,
+} from "./enums";
 
 // Better Auth core tables. Table and column names follow Better Auth's defaults
 // so the Drizzle adapter needs no field mapping.

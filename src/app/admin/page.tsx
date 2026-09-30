@@ -6,10 +6,8 @@ import {
   CategoryPill,
   PriorityIndicator,
   StatusBadge,
-  categoryLabel,
-  priorityLabel,
-  statusLabel,
 } from "@/components/tickets/ticket-badges";
+import { categoryLabel, priorityLabel, statusLabel } from "@/lib/ticket-labels";
 import {
   TICKET_CATEGORIES,
   TICKET_PRIORITIES,

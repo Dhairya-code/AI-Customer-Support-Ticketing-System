@@ -19,7 +19,10 @@ const {
   getQueueMetrics,
   getStaffTicketDetail,
   listQueueTickets,
+  listStaffMembers,
   parseQueueFilters,
+  setTicketStatus,
+  updateTicketTriage,
 } = await import("./staff-tickets");
 const { db } = await import("@/db");
 
@@ -34,6 +37,7 @@ await db.insert(user).values([
   },
   { id: "c2", name: "Robin", email: "robin@example.com", role: "customer" },
   { id: "a1", name: "Alex", email: "alex@example.com", role: "agent" },
+  { id: "m1", name: "Morgan", email: "morgan@example.com", role: "admin" },
 ]);
 
 function ticket(overrides: Partial<NewTicket> & { subject: string }): NewTicket {
@@ -190,6 +194,7 @@ describe("getStaffTicketDetail", () => {
       priority: "high",
       status: "in_progress",
       escalationReason: "Duplicate charge needs a billing refund.",
+      assignedToId: null,
       createdAt,
       updatedAt: expect.any(Date),
     });
@@ -340,5 +345,143 @@ describe("addStaffMessage", () => {
     expect(reply).toEqual({ ok: false, error: expect.stringMatching(/closed/i) });
     expect(note).toMatchObject({ ok: true });
     expect((await savedMessages()).map((m) => m.content)).toEqual(["FYI"]);
+  });
+});
+
+describe("listStaffMembers", () => {
+  it("lists agents and admins by name, leaving out customers", async () => {
+    expect(await listStaffMembers()).toEqual([
+      { id: "a1", name: "Alex", role: "agent" },
+      { id: "m1", name: "Morgan", role: "admin" },
+    ]);
+  });
+});
+
+describe("setTicketStatus", () => {
+  const alex = { id: "a1", name: "Alex" };
+  let ticketId: number;
+
+  beforeEach(async () => {
+    [{ id: ticketId }] = await db
+      .insert(tickets)
+      .values(ticket({ subject: "Charged twice", status: "open" }))
+      .returning({ id: tickets.id });
+  });
+
+  async function current() {
+    const [row] = await db.select().from(tickets).where(eq(tickets.id, ticketId));
+    return row;
+  }
+
+  async function threadMessages() {
+    return db.select().from(messages).where(eq(messages.ticketId, ticketId));
+  }
+
+  it("changes the status and records who changed it in the thread", async () => {
+    const result = await setTicketStatus({ agent: alex, ticketId, status: "resolved" });
+
+    expect(result).toEqual({ ok: true });
+    expect((await current()).status).toBe("resolved");
+    expect(await threadMessages()).toMatchObject([
+      {
+        senderType: "system",
+        senderId: null,
+        content: "Ticket marked as Resolved by Alex",
+        isInternal: false,
+      },
+    ]);
+  });
+
+  it("moves a resolved ticket back into progress", async () => {
+    await db.update(tickets).set({ status: "resolved" }).where(eq(tickets.id, ticketId));
+
+    const result = await setTicketStatus({ agent: alex, ticketId, status: "in_progress" });
+
+    expect(result).toEqual({ ok: true });
+    expect((await current()).status).toBe("in_progress");
+  });
+
+  // CONTEXT.md: a closed ticket is "finalized and locked".
+  it("refuses to change the status of a closed ticket", async () => {
+    await db.update(tickets).set({ status: "closed" }).where(eq(tickets.id, ticketId));
+
+    const result = await setTicketStatus({ agent: alex, ticketId, status: "open" });
+
+    expect(result).toEqual({ ok: false, error: expect.stringMatching(/closed/i) });
+    expect((await current()).status).toBe("closed");
+    expect(await threadMessages()).toEqual([]);
+  });
+
+  it("records nothing when the ticket already has that status", async () => {
+    const result = await setTicketStatus({ agent: alex, ticketId, status: "open" });
+
+    expect(result).toEqual({ ok: true });
+    expect(await threadMessages()).toEqual([]);
+  });
+
+  it("refuses a ticket that does not exist", async () => {
+    const result = await setTicketStatus({ agent: alex, ticketId: 999_999, status: "closed" });
+
+    expect(result).toEqual({ ok: false, error: expect.stringMatching(/not be found/i) });
+  });
+});
+
+describe("updateTicketTriage", () => {
+  let ticketId: number;
+
+  beforeEach(async () => {
+    [{ id: ticketId }] = await db
+      .insert(tickets)
+      .values(ticket({ subject: "Charged twice", priority: "low", category: "other" }))
+      .returning({ id: tickets.id });
+  });
+
+  async function current() {
+    const [row] = await db.select().from(tickets).where(eq(tickets.id, ticketId));
+    return row;
+  }
+
+  it("changes only the fields given", async () => {
+    expect(await updateTicketTriage(ticketId, { priority: "critical" })).toEqual({ ok: true });
+
+    expect(await current()).toMatchObject({ priority: "critical", category: "other" });
+  });
+
+  it("changes priority, category and assignee together", async () => {
+    const result = await updateTicketTriage(ticketId, {
+      priority: "high",
+      category: "payment",
+      assignedToId: "m1",
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(await current()).toMatchObject({
+      priority: "high",
+      category: "payment",
+      assignedToId: "m1",
+    });
+  });
+
+  it("unassigns the ticket", async () => {
+    await db.update(tickets).set({ assignedToId: "a1" }).where(eq(tickets.id, ticketId));
+
+    expect(await updateTicketTriage(ticketId, { assignedToId: null })).toEqual({ ok: true });
+    expect((await current()).assignedToId).toBeNull();
+  });
+
+  it.each([
+    ["a customer", "c1"],
+    ["an unknown user", "nobody"],
+  ])("refuses to assign the ticket to %s", async (_, assignedToId) => {
+    const result = await updateTicketTriage(ticketId, { assignedToId });
+
+    expect(result).toEqual({ ok: false, error: expect.any(String) });
+    expect((await current()).assignedToId).toBeNull();
+  });
+
+  it("refuses a ticket that does not exist", async () => {
+    const result = await updateTicketTriage(999_999, { priority: "high" });
+
+    expect(result).toEqual({ ok: false, error: expect.stringMatching(/not be found/i) });
   });
 });
