@@ -15,7 +15,8 @@ import {
   type StaffTicket,
   type StaffTicketCustomer,
 } from "@/lib/staff-tickets";
-import { parseTicketId } from "@/lib/tickets";
+import { acceptsReplies, parseTicketId } from "@/lib/tickets";
+import { StaffReplyForm } from "./staff-reply-form";
 
 export async function generateMetadata({
   params,
@@ -49,23 +50,29 @@ export default async function StaffTicketPage({
         <TicketSummary ticket={ticket} />
 
         <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_18rem]">
-          <section
-            aria-label="Conversation"
-            className="space-y-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200"
-          >
-            <h2 className="text-lg font-semibold text-gray-900">Conversation</h2>
-            {messages.length === 0 ? (
-              <p className="text-center text-sm text-gray-500">No messages yet.</p>
-            ) : (
-              messages.map((message) => (
-                <TranscriptMessage
-                  key={message.id}
-                  message={message}
-                  customerName={customer.name}
-                />
-              ))
-            )}
-          </section>
+          <div className="min-w-0 space-y-4">
+            <section
+              aria-label="Conversation"
+              className="space-y-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200"
+            >
+              <h2 className="text-lg font-semibold text-gray-900">Conversation</h2>
+              {messages.length === 0 ? (
+                <p className="text-center text-sm text-gray-500">No messages yet.</p>
+              ) : (
+                messages.map((message) => (
+                  <TranscriptMessage
+                    key={message.id}
+                    message={message}
+                    customerName={customer.name}
+                  />
+                ))
+              )}
+            </section>
+            <StaffReplyForm
+              ticketId={ticket.id}
+              acceptsReplies={acceptsReplies(ticket.status)}
+            />
+          </div>
 
           <CustomerProfile customer={customer} />
         </div>
@@ -155,11 +162,9 @@ const INTERNAL_NOTE_BUBBLE =
   "rounded-br-md bg-amber-50 text-amber-950 ring-1 ring-amber-200";
 
 function senderLabel(message: StaffThreadMessage, customerName: string): string {
-  const agentName = message.senderName ?? "Support agent";
-  if (message.isInternal) return `Internal note · ${agentName}`;
   if (message.senderType === "customer") return customerName;
   if (message.senderType === "ai") return "AI assistant";
-  return agentName;
+  return message.senderName ?? "Support agent";
 }
 
 // From the agent's side the customer is the other party, so their messages
@@ -185,7 +190,12 @@ function TranscriptMessage({
 
   return (
     <div className={`flex flex-col ${fromCustomer ? "items-start" : "items-end"}`}>
-      <p className="mb-1 flex items-center gap-2 px-1 text-xs text-gray-500">
+      <p className="mb-1 flex flex-wrap items-center gap-2 px-1 text-xs text-gray-500">
+        {message.isInternal && (
+          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-800 ring-1 ring-amber-300">
+            Internal Note - Only Staff Can See
+          </span>
+        )}
         <span className="font-medium text-gray-700">{label}</span>
         <LocalDate date={message.createdAt} withTime />
       </p>

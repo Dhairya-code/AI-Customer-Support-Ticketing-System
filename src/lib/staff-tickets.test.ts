@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { messages, tickets, user, type NewTicket } from "@/db/schema";
 
@@ -14,6 +15,7 @@ vi.mock("@/db", async () => {
 });
 
 const {
+  addStaffMessage,
   getQueueMetrics,
   getStaffTicketDetail,
   listQueueTickets,
@@ -235,5 +237,108 @@ describe("getStaffTicketDetail", () => {
 
   it("returns null for a ticket that does not exist", async () => {
     expect(await getStaffTicketDetail(999_999)).toBeNull();
+  });
+});
+
+describe("addStaffMessage", () => {
+  const longAgo = new Date("2026-01-01T00:00:00Z");
+  let ticketId: number;
+
+  beforeEach(async () => {
+    [{ id: ticketId }] = await db
+      .insert(tickets)
+      .values(ticket({ subject: "Charged twice", updatedAt: longAgo }))
+      .returning({ id: tickets.id });
+  });
+
+  async function savedMessages() {
+    return db.select().from(messages).where(eq(messages.ticketId, ticketId));
+  }
+
+  async function updatedAt() {
+    const [row] = await db
+      .select({ updatedAt: tickets.updatedAt })
+      .from(tickets)
+      .where(eq(tickets.id, ticketId));
+    return row.updatedAt;
+  }
+
+  it("saves a public reply from the agent and returns who to notify", async () => {
+    const result = await addStaffMessage({
+      agentId: "a1",
+      ticketId,
+      content: "  We've refunded the duplicate charge.  ",
+      kind: "reply",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      customer: { name: "Casey", email: "casey@example.com" },
+    });
+    expect(await savedMessages()).toMatchObject([
+      {
+        senderType: "agent",
+        senderId: "a1",
+        content: "We've refunded the duplicate charge.",
+        isInternal: false,
+      },
+    ]);
+    expect(await updatedAt()).not.toEqual(longAgo);
+  });
+
+  it("saves an internal note as a staff-only message", async () => {
+    const result = await addStaffMessage({
+      agentId: "a1",
+      ticketId,
+      content: "Checking with billing.",
+      kind: "note",
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(await savedMessages()).toMatchObject([
+      { senderType: "agent", senderId: "a1", content: "Checking with billing.", isInternal: true },
+    ]);
+  });
+
+  it("keeps internal notes out of the customer's view of the thread", async () => {
+    const { getCustomerTicketThread } = await import("./tickets");
+    await addStaffMessage({ agentId: "a1", ticketId, content: "Staff only", kind: "note" });
+    await addStaffMessage({ agentId: "a1", ticketId, content: "Hello Casey", kind: "reply" });
+
+    const thread = await getCustomerTicketThread("c1", ticketId);
+
+    expect(thread?.messages.map((m) => m.content)).toEqual(["Hello Casey"]);
+  });
+
+  it.each([
+    ["an empty message", "   "],
+    ["a message over the length limit", "x".repeat(4001)],
+  ])("refuses %s", async (_, content) => {
+    const result = await addStaffMessage({ agentId: "a1", ticketId, content, kind: "reply" });
+
+    expect(result).toEqual({ ok: false, error: expect.any(String) });
+    expect(await savedMessages()).toEqual([]);
+  });
+
+  it("refuses a ticket that does not exist", async () => {
+    const result = await addStaffMessage({
+      agentId: "a1",
+      ticketId: 999_999,
+      content: "Hello",
+      kind: "note",
+    });
+
+    expect(result).toEqual({ ok: false, error: expect.stringMatching(/not be found/i) });
+  });
+
+  it("refuses a public reply on a closed ticket but still takes internal notes", async () => {
+    await db.update(tickets).set({ status: "closed" }).where(eq(tickets.id, ticketId));
+
+    const reply = await addStaffMessage({ agentId: "a1", ticketId, content: "Hi", kind: "reply" });
+    const note = await addStaffMessage({ agentId: "a1", ticketId, content: "FYI", kind: "note" });
+
+    expect(reply).toEqual({ ok: false, error: expect.stringMatching(/closed/i) });
+    expect(note).toMatchObject({ ok: true });
+    expect((await savedMessages()).map((m) => m.content)).toEqual(["FYI"]);
   });
 });

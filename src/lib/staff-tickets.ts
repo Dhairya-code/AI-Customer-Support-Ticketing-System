@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, count, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, ne, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
@@ -15,6 +15,8 @@ import {
   type TicketPriority,
   type TicketStatus,
 } from "@/db/schema";
+import { MAX_MESSAGE_LENGTH } from "./chat";
+import { CLOSED_STATUS } from "./tickets";
 
 // Staff views of tickets: the triage queue at /admin and the ticket page at
 // /admin/tickets/[id]. Unlike the customer views, these span every customer
@@ -209,4 +211,76 @@ export async function getStaffTicketDetail(
     customer: { ...customer, previousTicketCount },
     messages: thread,
   };
+}
+
+// A public reply goes to the customer; an internal note is for staff only.
+export const STAFF_MESSAGE_KINDS = ["reply", "note"] as const;
+export type StaffMessageKind = (typeof STAFF_MESSAGE_KINDS)[number];
+
+export interface StaffMessageInput {
+  agentId: string;
+  ticketId: number;
+  content: string;
+  kind: StaffMessageKind;
+}
+
+export type StaffMessageResult =
+  // The ticket's customer, for the reply notification email.
+  | { ok: true; customer: { name: string; email: string } }
+  | { ok: false; error: string };
+
+// An agent's public reply or internal note on any ticket. Errors are shown to
+// the agent as-is.
+export async function addStaffMessage({
+  agentId,
+  ticketId,
+  content,
+  kind,
+}: StaffMessageInput): Promise<StaffMessageResult> {
+  const text = content.trim();
+  if (!text) return { ok: false, error: "Write a message before sending." };
+  if (text.length > MAX_MESSAGE_LENGTH) {
+    return {
+      ok: false,
+      error: `Messages can be at most ${MAX_MESSAGE_LENGTH} characters.`,
+    };
+  }
+
+  // As with customer replies, this single guarded update is where the message
+  // is accepted (neon-http has no transactions). A closed ticket is locked for
+  // the customer, so it takes no public replies either, only notes.
+  const isInternal = kind === "note";
+  const [customer] = await db
+    .update(tickets)
+    .set({ updatedAt: new Date() })
+    .from(user)
+    .where(
+      and(
+        eq(tickets.id, ticketId),
+        eq(tickets.userId, user.id),
+        isInternal ? undefined : ne(tickets.status, CLOSED_STATUS),
+      ),
+    )
+    .returning({ name: user.name, email: user.email });
+  if (!customer) {
+    const [ticket] = await db
+      .select({ id: tickets.id })
+      .from(tickets)
+      .where(eq(tickets.id, ticketId));
+    return {
+      ok: false,
+      error: ticket
+        ? "This ticket is closed, so it takes internal notes only."
+        : "This ticket could not be found.",
+    };
+  }
+
+  await db.insert(messages).values({
+    ticketId,
+    senderType: "agent",
+    senderId: agentId,
+    content: text,
+    isInternal,
+  });
+  return { ok: true, customer };
 }

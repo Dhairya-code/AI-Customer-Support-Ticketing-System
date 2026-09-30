@@ -85,7 +85,7 @@ export type CustomerTicketSummary = Pick<
   "id" | "subject" | "category" | "priority" | "status" | "createdAt"
 >;
 
-const CLOSED_STATUS = "closed" satisfies TicketStatus;
+export const CLOSED_STATUS = "closed" satisfies TicketStatus;
 
 // Closed tickets are locked; every other status still takes replies.
 export function acceptsReplies(status: TicketStatus): boolean {
