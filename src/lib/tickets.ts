@@ -1,7 +1,7 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { messages, tickets, type NewMessage } from "@/db/schema";
+import { messages, tickets, type NewMessage, type Ticket } from "@/db/schema";
 import type { ChatTurn, CreateTicketArgs } from "./gemini";
 
 export interface CreateTicketFromChatInput {
@@ -54,4 +54,29 @@ export async function createTicketFromChat({
 // confirmation the customer saw.
 export async function appendAiReply(ticketId: number, text: string): Promise<void> {
   await db.insert(messages).values({ ticketId, senderType: "ai", content: text });
+}
+
+export type CustomerTicketSummary = Pick<
+  Ticket,
+  "id" | "subject" | "category" | "priority" | "status" | "createdAt"
+>;
+
+// The customer's "My Tickets" list, newest first. Leaves out staff-only
+// fields such as the escalation reason and assignee.
+export async function listCustomerTickets(
+  customerId: string,
+): Promise<CustomerTicketSummary[]> {
+  return db
+    .select({
+      id: tickets.id,
+      subject: tickets.subject,
+      category: tickets.category,
+      priority: tickets.priority,
+      status: tickets.status,
+      createdAt: tickets.createdAt,
+    })
+    .from(tickets)
+    .where(eq(tickets.userId, customerId))
+    // Tickets opened in the same instant still list newest first.
+    .orderBy(desc(tickets.createdAt), desc(tickets.id));
 }
