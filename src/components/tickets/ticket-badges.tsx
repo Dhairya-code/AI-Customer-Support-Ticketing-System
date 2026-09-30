@@ -20,6 +20,18 @@ const PRIORITY_STYLES: Record<TicketPriority, { label: string; dot: string }> = 
   critical: { label: "Critical", dot: "bg-red-600" },
 };
 
+export function statusLabel(status: TicketStatus): string {
+  return STATUS_STYLES[status].label;
+}
+
+export function priorityLabel(priority: TicketPriority): string {
+  return PRIORITY_STYLES[priority].label;
+}
+
+export function categoryLabel(category: TicketCategory): string {
+  return category.charAt(0).toUpperCase() + category.slice(1);
+}
+
 export function StatusBadge({ status }: { status: TicketStatus }) {
   const { label, className } = STATUS_STYLES[status];
   return (
