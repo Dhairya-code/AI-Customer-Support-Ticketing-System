@@ -44,6 +44,20 @@ export async function requireStaffPage(): Promise<SessionUser> {
   }
 }
 
+// For customer pages such as the chat on `/`: signed-out visitors go to
+// /login and staff to their dashboard. Route handlers should call
+// requireRole(["customer"]) and answer 401/403 instead.
+export async function requireCustomerPage(): Promise<SessionUser> {
+  try {
+    return await requireRole(["customer"]);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      redirect(error.status === 401 ? "/login" : "/admin");
+    }
+    throw error;
+  }
+}
+
 // Any signed-in user, staff included.
 export async function requireUser(): Promise<SessionUser> {
   return requireRole(USER_ROLES);
