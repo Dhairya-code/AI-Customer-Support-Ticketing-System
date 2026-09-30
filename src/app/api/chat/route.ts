@@ -1,10 +1,13 @@
+import { after } from "next/server";
 import type { SessionUser } from "@/lib/auth";
 import { parseChatRequest, type ChatResponse } from "@/lib/chat";
+import { sendAgentAlertEmail, sendTicketCreatedEmail } from "@/lib/email";
 import {
   CREATE_TICKET_TOOL,
   getGeminiClient,
   parseCreateTicketArgs,
   runConversation,
+  type CreateTicketArgs,
   type ToolCall,
   type ToolResult,
 } from "@/lib/gemini";
@@ -14,6 +17,27 @@ import { appendAiReply, createTicketFromChat } from "@/lib/tickets";
 
 const AI_UNAVAILABLE_MESSAGE =
   "Our assistant is having trouble responding right now. Please try again in a moment.";
+
+// Sent after the response so email never delays the customer's reply. The
+// helpers log their own failures and never throw.
+function notifyTicketCreated(
+  customer: SessionUser,
+  ticketId: number,
+  { subject, category, priority, escalationReason }: CreateTicketArgs,
+): void {
+  after(() =>
+    Promise.all([
+      sendTicketCreatedEmail({
+        to: customer.email,
+        customerName: customer.name,
+        ticketId,
+        subject,
+        reason: escalationReason,
+      }),
+      sendAgentAlertEmail({ ticketId, subject, priority, category }),
+    ]),
+  );
+}
 
 export async function POST(request: Request): Promise<Response> {
   // Customers only: tickets escalated from chat are raised on their behalf.
@@ -60,6 +84,7 @@ export async function POST(request: Request): Promise<Response> {
         console.error("Ticket creation failed", error);
         throw new Error("The ticket could not be saved");
       }
+      notifyTicketCreated(customer, ticketId, details);
     }
     return { ticketId, status: "created" };
   }

@@ -13,8 +13,20 @@ const getSession = vi.hoisted(() => vi.fn());
 const generateContent = vi.hoisted(() =>
   vi.fn<(params: GenerateContentParameters) => Promise<GenerateContentResponse>>(),
 );
+const sendEmail = vi.hoisted(() => vi.fn());
+// Work the route defers with after(), run by runAfterResponse().
+const afterResponse = vi.hoisted(() => [] as (() => unknown)[]);
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
+vi.mock("next/server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/server")>()),
+  after: (task: () => unknown) => afterResponse.push(task),
+}));
+vi.mock("resend", () => ({
+  Resend: class {
+    emails = { send: sendEmail };
+  },
+}));
 vi.mock("@/lib/auth", () => ({ auth: { api: { getSession } } }));
 vi.mock("@/lib/gemini", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/gemini")>()),
@@ -77,13 +89,28 @@ function chatRequest(body: unknown): Request {
   });
 }
 
+async function runAfterResponse() {
+  for (const task of afterResponse.splice(0)) await task();
+}
+
+function sentEmails(): { to: string; subject: string }[] {
+  return sendEmail.mock.calls.map(([payload]) => payload);
+}
+
 beforeEach(async () => {
   getSession.mockReset();
   generateContent.mockReset();
+  sendEmail.mockReset();
+  sendEmail.mockResolvedValue({ data: { id: "email-1" }, error: null, headers: null });
+  afterResponse.length = 0;
+  vi.stubEnv("RESEND_API_KEY", "re_test");
+  vi.stubEnv("RESEND_FROM_EMAIL", "support@example.com");
+  vi.stubEnv("SUPPORT_TEAM_EMAIL", "team@example.com");
   await db.delete(tickets); // cascades to their messages
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -362,5 +389,79 @@ describe("POST /api/chat escalation", () => {
       ...turns.map((turn) => turn.text),
       "Ticket opened.",
     ]);
+  });
+});
+
+describe("POST /api/chat escalation emails", () => {
+  function escalate() {
+    generateContent
+      .mockResolvedValueOnce(modelReply(createTicketCall()))
+      .mockResolvedValueOnce(modelReply({ text: "Ticket opened." }));
+    return POST(chatRequest({ messages: [{ role: "user", text: "I want a human" }] }));
+  }
+
+  it("emails the customer a receipt and alerts the support team after responding", async () => {
+    signInAs(customer);
+
+    const response = await escalate();
+
+    // Nothing is sent before the customer has their reply.
+    expect(sendEmail).not.toHaveBeenCalled();
+    await runAfterResponse();
+
+    const [ticket] = await allTickets();
+    expect(sentEmails()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          to: customer.email,
+          subject: expect.stringContaining(`#${ticket.id}`),
+        }),
+        expect.objectContaining({
+          to: "team@example.com",
+          subject: expect.stringContaining(`#${ticket.id}`),
+        }),
+      ]),
+    );
+    expect(sendEmail).toHaveBeenCalledTimes(2);
+    expect(response.status).toBe(200);
+  });
+
+  it("keeps the ticket and confirms it when the emails fail", async () => {
+    signInAs(customer);
+    sendEmail.mockRejectedValue(new Error("fetch failed"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await escalate();
+    await runAfterResponse();
+
+    const [ticket] = await allTickets();
+    expect(ticket).toBeDefined();
+    expect(await response.json()).toEqual({
+      reply: "Ticket opened.",
+      ticket: { id: ticket.id },
+    });
+  });
+
+  it("sends no email when the turn opens no ticket", async () => {
+    signInAs(customer);
+    generateContent.mockResolvedValue(modelReply({ text: "Returns take 30 days." }));
+
+    await POST(chatRequest({ messages: [{ role: "user", text: "Return policy?" }] }));
+    await runAfterResponse();
+
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("sends one receipt and one alert when the model calls create_ticket twice in a turn", async () => {
+    signInAs(customer);
+    generateContent
+      .mockResolvedValueOnce(modelReply(createTicketCall()))
+      .mockResolvedValueOnce(modelReply(createTicketCall()))
+      .mockResolvedValueOnce(modelReply({ text: "Your ticket is open." }));
+
+    await POST(chatRequest({ messages: [{ role: "user", text: "I want a human" }] }));
+    await runAfterResponse();
+
+    expect(sendEmail).toHaveBeenCalledTimes(2);
   });
 });
