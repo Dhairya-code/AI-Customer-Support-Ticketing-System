@@ -7,9 +7,9 @@
 **Status:** done
 
 - [x] Create `src/app/admin/page.tsx` protected by role guard (`agent` or `admin`) (`requireStaffPage`: anyone else lands on `/admin/login`).
-- [x] Display aggregate metric cards (Total Tickets, Open Tickets, High/Critical Tickets, Resolved Tickets) (`getQueueMetrics` in `src/lib/ticket-queue.ts`; counts the whole queue regardless of filters).
+- [x] Display aggregate metric cards (Total Tickets, Open Tickets, High/Critical Tickets, Resolved Tickets) (`getQueueMetrics` in `src/lib/staff-tickets.ts`; counts the whole queue regardless of filters).
 - [x] Build ticket table with customer name, email, subject, category, priority, status, and creation date (`listQueueTickets`, newest first).
 - [x] Add client-side or searchParam filters for Status (`open`, `in_progress`, `resolved`, `closed`), Priority, and Category (searchParams via a plain GET form; unknown values are ignored by `parseQueueFilters`).
 - [x] Make table rows clickable, linking directly to `/admin/tickets/[id]`.
 
-**Notes for later tickets:** "Open Tickets" counts `status = open` only, not `in_progress`; "High/Critical" counts every status. Rows link to `/admin/tickets/[id]`, which 404s until ticket 13 lands. The legacy `src/app/agent/page.tsx` (fetches from the old Python backend) is now superseded by `/admin`.
+**Notes for later tickets:** "Open Tickets" counts `status = open` only, not `in_progress`; "High/Critical" counts every status. The legacy `src/app/agent/page.tsx` (fetches from the old Python backend) is now superseded by `/admin`.
