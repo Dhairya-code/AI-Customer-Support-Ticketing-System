@@ -23,7 +23,7 @@ import {
   type QueueFilters,
   type QueueMetrics,
   type QueueTicket,
-} from "@/lib/ticket-queue";
+} from "@/lib/staff-tickets";
 
 export const metadata: Metadata = {
   title: "Staff dashboard | AI Customer Support",

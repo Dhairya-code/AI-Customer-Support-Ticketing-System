@@ -1,19 +1,24 @@
 import "server-only";
-import { and, count, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
   TICKET_CATEGORIES,
   TICKET_PRIORITIES,
   TICKET_STATUSES,
+  messages,
   tickets,
   user,
+  type Message,
   type Ticket,
   type TicketCategory,
   type TicketPriority,
   type TicketStatus,
 } from "@/db/schema";
 
-// The staff triage queue at /admin: every customer's tickets, not just one's.
+// Staff views of tickets: the triage queue at /admin and the ticket page at
+// /admin/tickets/[id]. Unlike the customer views, these span every customer
+// and include internal notes.
 
 export interface QueueFilters {
   status?: TicketStatus;
@@ -105,4 +110,103 @@ export async function listQueueTickets(
     .where(and(...conditions))
     // Tickets opened in the same instant still list newest first.
     .orderBy(desc(tickets.createdAt), desc(tickets.id));
+}
+
+export type StaffTicket = Pick<
+  Ticket,
+  | "id"
+  | "subject"
+  | "category"
+  | "priority"
+  | "status"
+  | "escalationReason"
+  | "createdAt"
+  | "updatedAt"
+>;
+
+export interface StaffTicketCustomer {
+  id: string;
+  name: string;
+  email: string;
+  // When they registered.
+  createdAt: Date;
+  // Tickets they opened before this one.
+  previousTicketCount: number;
+}
+
+export type StaffThreadMessage = Pick<
+  Message,
+  "id" | "senderType" | "content" | "isInternal" | "createdAt"
+> & {
+  // Null for AI and system messages, or a sender whose account was deleted.
+  senderName: string | null;
+};
+
+export interface StaffTicketDetail {
+  ticket: StaffTicket;
+  customer: StaffTicketCustomer;
+  messages: StaffThreadMessage[];
+}
+
+// Everything the agent ticket page shows, or null if there is no such ticket.
+export async function getStaffTicketDetail(
+  ticketId: number,
+): Promise<StaffTicketDetail | null> {
+  const [row] = await db
+    .select({
+      ticket: {
+        id: tickets.id,
+        subject: tickets.subject,
+        category: tickets.category,
+        priority: tickets.priority,
+        status: tickets.status,
+        escalationReason: tickets.escalationReason,
+        createdAt: tickets.createdAt,
+        updatedAt: tickets.updatedAt,
+      },
+      customer: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        createdAt: user.createdAt,
+      },
+    })
+    .from(tickets)
+    .innerJoin(user, eq(tickets.userId, user.id))
+    .where(eq(tickets.id, ticketId));
+  if (!row) return null;
+
+  const { ticket, customer } = row;
+  // Compared in SQL: JS Dates drop the microseconds Postgres keeps. Ties on
+  // createdAt fall back to id, as in the queue's ordering.
+  const current = alias(tickets, "current");
+  const openedBeforeThis = sql`(${tickets.createdAt}, ${tickets.id}) < ${db
+    .select({ createdAt: current.createdAt, id: current.id })
+    .from(current)
+    .where(eq(current.id, ticketId))}`;
+  const [[{ previousTicketCount }], thread] = await Promise.all([
+    db
+      .select({ previousTicketCount: count() })
+      .from(tickets)
+      .where(and(eq(tickets.userId, customer.id), openedBeforeThis)),
+    db
+      .select({
+        id: messages.id,
+        senderType: messages.senderType,
+        content: messages.content,
+        isInternal: messages.isInternal,
+        createdAt: messages.createdAt,
+        senderName: user.name,
+      })
+      .from(messages)
+      .leftJoin(user, eq(messages.senderId, user.id))
+      .where(eq(messages.ticketId, ticketId))
+      .orderBy(asc(messages.createdAt), asc(messages.id)),
+  ]);
+
+  return {
+    ticket,
+    customer: { ...customer, previousTicketCount },
+    messages: thread,
+  };
 }

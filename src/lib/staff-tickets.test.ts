@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { tickets, user, type NewTicket } from "@/db/schema";
+import { messages, tickets, user, type NewTicket } from "@/db/schema";
 
 // A real Postgres (in-memory PGlite) with the app's migrations applied stands
 // in for Neon, so queries are checked against the actual schema.
@@ -13,14 +13,25 @@ vi.mock("@/db", async () => {
   return { db };
 });
 
-const { getQueueMetrics, listQueueTickets, parseQueueFilters } = await import(
-  "./ticket-queue"
-);
+const {
+  getQueueMetrics,
+  getStaffTicketDetail,
+  listQueueTickets,
+  parseQueueFilters,
+} = await import("./staff-tickets");
 const { db } = await import("@/db");
 
+const caseyJoined = new Date("2026-01-15T09:00:00Z");
 await db.insert(user).values([
-  { id: "c1", name: "Casey", email: "casey@example.com", role: "customer" },
+  {
+    id: "c1",
+    name: "Casey",
+    email: "casey@example.com",
+    role: "customer",
+    createdAt: caseyJoined,
+  },
   { id: "c2", name: "Robin", email: "robin@example.com", role: "customer" },
+  { id: "a1", name: "Alex", email: "alex@example.com", role: "agent" },
 ]);
 
 function ticket(overrides: Partial<NewTicket> & { subject: string }): NewTicket {
@@ -145,5 +156,84 @@ describe("listQueueTickets", () => {
     const list = await listQueueTickets({ status: "resolved" });
 
     expect(list.map((t) => t.subject)).toEqual(["Resolved"]);
+  });
+});
+
+describe("getStaffTicketDetail", () => {
+  async function insertTicket(overrides: Partial<NewTicket> & { subject: string }) {
+    const [{ id }] = await db
+      .insert(tickets)
+      .values(ticket(overrides))
+      .returning({ id: tickets.id });
+    return id;
+  }
+
+  it("returns the full ticket, including the escalation reason", async () => {
+    const createdAt = new Date("2026-09-03T10:00:00Z");
+    const id = await insertTicket({
+      subject: "Charged twice",
+      category: "payment",
+      priority: "high",
+      status: "in_progress",
+      escalationReason: "Duplicate charge needs a billing refund.",
+      createdAt,
+    });
+
+    const detail = await getStaffTicketDetail(id);
+
+    expect(detail?.ticket).toEqual({
+      id,
+      subject: "Charged twice",
+      category: "payment",
+      priority: "high",
+      status: "in_progress",
+      escalationReason: "Duplicate charge needs a billing refund.",
+      createdAt,
+      updatedAt: expect.any(Date),
+    });
+  });
+
+  it("returns the customer's profile and how many tickets they opened before this one", async () => {
+    const at = new Date("2026-09-03T10:00:00Z");
+    await insertTicket({ subject: "Earlier", createdAt: new Date("2026-08-01T10:00:00Z") });
+    await insertTicket({ subject: "Same moment, earlier id", createdAt: at });
+    const id = await insertTicket({ subject: "This one", createdAt: at });
+    await insertTicket({ subject: "Later", createdAt: new Date("2026-09-10T10:00:00Z") });
+    await insertTicket({ subject: "Someone else's", userId: "c2", createdAt: new Date("2026-01-01T10:00:00Z") });
+
+    const detail = await getStaffTicketDetail(id);
+
+    expect(detail?.customer).toEqual({
+      id: "c1",
+      name: "Casey",
+      email: "casey@example.com",
+      createdAt: caseyJoined,
+      previousTicketCount: 2,
+    });
+  });
+
+  it("returns every message oldest first, internal notes included, with agent names", async () => {
+    const id = await insertTicket({ subject: "Charged twice" });
+    await db.insert(messages).values([
+      { ticketId: id, senderType: "customer", senderId: "c1", content: "I was charged twice", createdAt: new Date("2026-09-01T10:00:00Z") },
+      { ticketId: id, senderType: "ai", content: "I've opened a ticket.", createdAt: new Date("2026-09-01T10:01:00Z") },
+      { ticketId: id, senderType: "agent", senderId: "a1", content: "Checking with billing.", isInternal: true, createdAt: new Date("2026-09-01T11:00:00Z") },
+      { ticketId: id, senderType: "customer", senderId: "c1", content: "Any update?", createdAt: new Date("2026-09-01T12:00:00Z") },
+    ]);
+
+    const detail = await getStaffTicketDetail(id);
+
+    expect(
+      detail?.messages.map((m) => [m.senderType, m.senderName, m.content, m.isInternal]),
+    ).toEqual([
+      ["customer", "Casey", "I was charged twice", false],
+      ["ai", null, "I've opened a ticket.", false],
+      ["agent", "Alex", "Checking with billing.", true],
+      ["customer", "Casey", "Any update?", false],
+    ]);
+  });
+
+  it("returns null for a ticket that does not exist", async () => {
+    expect(await getStaffTicketDetail(999_999)).toBeNull();
   });
 });
